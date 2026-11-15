@@ -23,6 +23,12 @@ type Execution = {
   createdAt: string;
 };
 
+type PaymentPreference = {
+  id: string;
+  initPoint: string;
+  sandboxInitPoint?: string;
+};
+
 const api = {
   auth: import.meta.env.VITE_AUTH_API_URL ?? "",
   os: import.meta.env.VITE_OS_API_URL ?? "http://localhost:5001",
@@ -53,6 +59,7 @@ export default function App() {
   const [order, setOrder] = useState<WorkOrder>();
   const [quote, setQuote] = useState<Quote>();
   const [paymentApproved, setPaymentApproved] = useState(false);
+  const [paymentStarted, setPaymentStarted] = useState(false);
   const [execution, setExecution] = useState<Execution>();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -123,12 +130,31 @@ export default function App() {
     if (!quote) return;
     setBusy(true);
     try {
-      const approved = await request<Quote>(`${api.billing}/quotes/${quote.id}/approve`, token, "POST");
-      setQuote(approved);
-      setPaymentApproved(true);
-      setMessage("Pagamento aprovado. A OS foi liberada para execução.");
+      const preference = await request<PaymentPreference>(`${api.billing}/quotes/${quote.id}/payment`, token, "POST");
+      setPaymentStarted(true);
+      window.open(preference.sandboxInitPoint ?? preference.initPoint, "_blank", "noopener,noreferrer");
+      setMessage("Checkout aberto no Mercado Pago. Após pagar, clique em Verificar pagamento.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Não foi possível aprovar o pagamento.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível abrir o checkout.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkPayment() {
+    if (!quote) return;
+    setBusy(true);
+    try {
+      const current = await request<Quote>(`${api.billing}/quotes/${quote.id}`, token, "GET");
+      setQuote(current);
+      if (current.status === "Approved") {
+        setPaymentApproved(true);
+        setMessage("Pagamento confirmado. A OS foi liberada para execução.");
+      } else {
+        setMessage("O pagamento ainda não foi aprovado pelo Mercado Pago.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível consultar o pagamento.");
     } finally {
       setBusy(false);
     }
@@ -189,7 +215,7 @@ export default function App() {
         </div>
         <div className="actions">
           <div className={`action-card ${order ? "ready" : ""}`}><div className="action-icon">R$</div><div><span>BALCÃO · BILLING</span><h3>Montar orçamento</h3></div><button onClick={createQuote} disabled={!order || busy}>Montar <b>→</b></button></div>
-          <div className={`action-card ${quote ? "ready" : ""}`}><div className="action-icon payment">✓</div><div><span>CHECKOUT · MERCADO PAGO</span><h3>Aprovar pagamento</h3></div><button onClick={approvePayment} disabled={!quote || paymentApproved || busy}>Aprovar <b>→</b></button></div>
+          <div className={`action-card ${quote ? "ready" : ""}`}><div className="action-icon payment">✓</div><div><span>CHECKOUT · MERCADO PAGO</span><h3>Pagar orçamento</h3></div><button onClick={approvePayment} disabled={!quote || paymentApproved || busy}>Pagar <b>→</b></button>{paymentStarted && !paymentApproved && <button onClick={checkPayment} disabled={busy}>Verificar</button>}</div>
           <div className={`action-card ${paymentApproved ? "ready" : ""}`}><div className="action-icon wrench">⚙</div><div><span>BOX · EXECUTION</span><h3>Liberar para o mecânico</h3></div><button onClick={enqueueExecution} disabled={!paymentApproved || busy}>Liberar <b>→</b></button></div>
         </div>
         {message && <div className="notice">{message}</div>}
